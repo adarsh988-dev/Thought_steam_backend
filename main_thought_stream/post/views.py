@@ -2,10 +2,13 @@ from rest_framework.views import APIView
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from rest_framework import status
+from rest_framework_simplejwt.authentication import JWTAuthentication
 from .serializers import PostSerializer, CommentSerializer
 from .models import Post
+from .permission import CustomJWTAuthentication
 
 class PostView(APIView):
+    authentication_classes = [CustomJWTAuthentication]
     permission_classes = [IsAuthenticated]
     
     # GET method to retrieve all posts with their comments
@@ -19,7 +22,7 @@ class PostView(APIView):
     # POST method to create a new post
     def post(self, request):
         print("request data ---->",request.user)
-        if not request.user.is_authenticated:
+        if not request.user:
             return Response({'detail': 'Authentication credentials were not provided or are invalid.'},
                             status=status.HTTP_401_UNAUTHORIZED)
         serializer = PostSerializer(data=request.data)
@@ -64,6 +67,7 @@ class PostView(APIView):
 
 
 class CommentView(APIView):
+    authentication_classes = [CustomJWTAuthentication]
     permission_classes = [IsAuthenticated]
 
     # POST method to create a new comment

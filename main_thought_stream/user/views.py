@@ -3,6 +3,7 @@ from rest_framework.response import Response
 from rest_framework.views import APIView
 from .serializers import UserRegistrationSerializer, UserLoginSerializer
 from rest_framework_simplejwt.tokens import RefreshToken
+from rest_framework.authentication import BasicAuthentication, SessionAuthentication
 
 def get_token_for_user(user):
     refresh = RefreshToken.for_user(user)
@@ -14,6 +15,7 @@ def get_token_for_user(user):
     }
 
 class RegisterView(APIView):
+    authentication_classes = [BasicAuthentication, SessionAuthentication] 
     def post(self, request):
         serializer = UserRegistrationSerializer(data=request.data)
         if serializer.is_valid(raise_exception = True):
@@ -23,6 +25,7 @@ class RegisterView(APIView):
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
 class LoginView(APIView):
+    authentication_classes = [BasicAuthentication, SessionAuthentication] 
     def post(self, request):
         serializer = UserLoginSerializer(data=request.data)
         if serializer.is_valid():
