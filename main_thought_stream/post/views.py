@@ -25,7 +25,8 @@ class PostView(APIView):
         if not request.user:
             return Response({'detail': 'Authentication credentials were not provided or are invalid.'},
                             status=status.HTTP_401_UNAUTHORIZED)
-        serializer = PostSerializer(data=request.data)
+        print("request",request.data)
+        serializer = PostSerializer(data=request.data, context={'request': request})
         if serializer.is_valid(raise_exception=True):
             serializer.save(author=request.user)
             return Response(serializer.data, status=status.HTTP_201_CREATED)
@@ -44,7 +45,7 @@ class PostView(APIView):
                             status=status.HTTP_403_FORBIDDEN)
         
         # Use the PostSerializer to validate and update the post
-        serializer = PostSerializer(post, data=request.data, partial=True)  # Partial update allows updating specific fields
+        serializer = PostSerializer(post, data=request.data, context ={'request': request},partial=True)  # Partial update allows updating specific fields
         if serializer.is_valid(raise_exception=True):
             serializer.save()  # Save the changes
             return Response(serializer.data, status=status.HTTP_200_OK)
