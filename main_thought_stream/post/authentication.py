@@ -36,7 +36,6 @@ class CustomJWTAuthentication(BaseAuthentication):
             raise AuthenticationFailed('Token does not contain a valid user ID.')
 
         try:
-            # Get the user associated with the token's user_id
             user = User.objects.get(id=user_id)
         except User.DoesNotExist:
             raise AuthenticationFailed('User not found.')

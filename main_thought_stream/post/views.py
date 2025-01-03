@@ -2,106 +2,162 @@ from rest_framework.views import APIView
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from rest_framework import status
-from rest_framework_simplejwt.authentication import JWTAuthentication
+from rest_framework import generics
+from rest_framework.permissions import IsAuthenticatedOrReadOnly,AllowAny
 from .serializers import PostSerializer, CommentSerializer
 from .models import Post, Comment
-from .permission import CustomJWTAuthentication
+from .authentication import CustomJWTAuthentication
 
 class PostView(APIView):
-    authentication_classes = [CustomJWTAuthentication]
-    permission_classes = [IsAuthenticated]
-    
-    # GET method to retrieve all posts with their comments
+    permission_classes = []
+    authentication_classes = [] 
+
     def get(self, request):
-        posts = Post.objects.all()
-        # Use the PostSerializer to serialize the posts along with their related comments
+        posts = Post.objects.all().order_by('-created_at')
         serializer = PostSerializer(posts, many=True)
-        print(serializer.data)
         return Response(serializer.data)
-
-    # POST method to create a new post
-    def post(self, request):
-        print("request data ---->",request.user)
-        if not request.user:
-            return Response({'detail': 'Authentication credentials were not provided or are invalid.'},
-                            status=status.HTTP_401_UNAUTHORIZED)
-        print("request",request.data)
-        serializer = PostSerializer(data=request.data, context={'request': request})
-        if serializer.is_valid(raise_exception=True):
-            serializer.save(author=request.user)
-            return Response(serializer.data, status=status.HTTP_201_CREATED)
-        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
     
-    # PUT method to update an existing post
-    def put(self, request, pk):
-        try:
-            post = Post.objects.get(pk=pk)
-        except Post.DoesNotExist:
-            return Response({'detail': 'Post not found.'}, status=status.HTTP_404_NOT_FOUND)
-        
-        # Check if the authenticated user is the author of the post
-        if post.author != request.user:
-            return Response({'detail': 'You do not have permission to edit this post.'},
-                            status=status.HTTP_403_FORBIDDEN)
-        
-        # Use the PostSerializer to validate and update the post
-        serializer = PostSerializer(post, data=request.data, context ={'request': request},partial=True)  # Partial update allows updating specific fields
-        if serializer.is_valid(raise_exception=True):
-            serializer.save()  # Save the changes
-            return Response(serializer.data, status=status.HTTP_200_OK)
+class PostCreationView(APIView):
+    permission_classes = [IsAuthenticated]
+    authentication_classes = [CustomJWTAuthentication]
+    
+    def post(self, request):
+        print("request--->",request.user)
+        serializer = PostSerializer(data=request.data, context={'request': request})
+        if serializer.is_valid():
+            serializer.save() 
+            return Response(serializer.data, status=status.HTTP_201_CREATED)  
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
-    # DELETE method to delete a post
-    def delete(self, request, pk):
-        try:
-            post = Post.objects.get(pk=pk)
-        except Post.DoesNotExist:
-            return Response({'detail': 'Post not found.'}, status=status.HTTP_404_NOT_FOUND)
-        
-        # Check if the current user is the author of the post
-        if post.author != request.user:
-            return Response({'detail': 'You do not have permission to delete this post.'},
-                            status=status.HTTP_403_FORBIDDEN)
-        
-        post.delete() 
-        return Response({'detail': 'Post deleted successfully.'}, status=status.HTTP_204_NO_CONTENT)
+    
+class PostCommentsView(generics.ListAPIView):
+    permission_classes = [AllowAny] 
+    authentication_classes = []  
+    serializer_class = CommentSerializer
 
+    def get_queryset(self):
+        """
+        Override to filter comments by post_id from the URL.
+        """
+        post_id = self.kwargs.get('post_id')
+        print("post id is----->",post_id)
+        try:
+            post = Post.objects.get(id=post_id)  
+        except Post.DoesNotExist:
+            return Comment.objects.none() 
+
+        return Comment.objects.filter(post=post_id, parent_comment__isnull=True).order_by('created_at')
 
 class CommentView(APIView):
     authentication_classes = [CustomJWTAuthentication]
     permission_classes = [IsAuthenticated]
 
-    # POST method to create a new comment
-    def post(self, request):
+    def post(self, request, post_id):
         if not request.user.is_authenticated:
             return Response({'detail': 'Authentication credentials were not provided or are invalid.'},
                             status=status.HTTP_401_UNAUTHORIZED)
-        
-        post_id = request.data.get('post')  
-        content = request.data.get('content')  
-        parent_comment_id = request.data.get('parent_comment')
-        # Ensure the post exists
+
         try:
             post = Post.objects.get(id=post_id)
         except Post.DoesNotExist:
             return Response({'detail': 'Post not found.'}, status=status.HTTP_404_NOT_FOUND)
+        print("request",request.data)
+        content = request.data.get('content')
+        parent_comment_id = request.data.get('parent_comment',None)
 
+        # Check if parent_comment_id is provided and exists
         parent_comment = None
         if parent_comment_id:
             try:
                 parent_comment = Comment.objects.get(id=parent_comment_id)
             except Comment.DoesNotExist:
                 return Response({'detail': 'Parent comment not found.'}, status=status.HTTP_404_NOT_FOUND)
-        # # Prepare data for the comment
+
+        # Prepare data for the new comment
         data = {
             'post': post.id,
             'content': content,
             'user': request.user.id,
-            'parent_comment': parent_comment.id if parent_comment else None  
+            'parent_comment': parent_comment.id if parent_comment else None
         }
+
         serializer = CommentSerializer(data=data)
         if serializer.is_valid(raise_exception=True):
-            # Save the comment, associating it with the authenticated user
             serializer.save(user=request.user)
             return Response(serializer.data, status=status.HTTP_201_CREATED)
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
+class PostUpdateDeleteView(APIView):
+    authentication_classes = [CustomJWTAuthentication]
+    permission_classes = [IsAuthenticated]
+
+    def put(self, request, post_id):
+        try:
+            post = Post.objects.get(id=post_id)
+        except Post.DoesNotExist:
+            return Response({'detail': 'Post not found.'}, status=status.HTTP_404_NOT_FOUND)
+
+        # Ensure the authenticated user is the author of the post
+        if post.author != request.user:
+            return Response({'detail': 'You do not have permission to edit this post.'},
+                            status=status.HTTP_403_FORBIDDEN)
+
+        # Serialize and update the post
+        serializer = PostSerializer(post, data=request.data, partial=True)
+        if serializer.is_valid(raise_exception=True):
+            serializer.save()  # Save the changes
+            return Response(serializer.data, status=status.HTTP_200_OK)
+        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
+    # DELETE method to delete an existing post
+    def delete(self, request, post_id):
+        try:
+            post = Post.objects.get(id=post_id)
+        except Post.DoesNotExist:
+            return Response({'detail': 'Post not found.'}, status=status.HTTP_404_NOT_FOUND)
+
+        # Ensure the authenticated user is the author of the post
+        if post.author != request.user:
+            return Response({'detail': 'You do not have permission to delete this post.'},
+                            status=status.HTTP_403_FORBIDDEN)
+
+        post.delete()  # Delete the post
+        return Response({'detail': 'Post deleted successfully.'}, status=status.HTTP_204_NO_CONTENT)
+
+class CommentUpdateDeleteView(APIView):
+    authentication_classes = [CustomJWTAuthentication]
+    permission_classes = [IsAuthenticated]
+
+    # PUT method to update an existing comment
+    def put(self, request, comment_id):
+        try:
+            comment = Comment.objects.get(id=comment_id)
+        except Comment.DoesNotExist:
+            return Response({'detail': 'Comment not found.'}, status=status.HTTP_404_NOT_FOUND)
+
+        # Ensure the authenticated user is the author of the comment
+        if comment.user != request.user:
+            return Response({'detail': 'You do not have permission to edit this comment.'},
+                            status=status.HTTP_403_FORBIDDEN)
+
+        # Serialize and update the comment
+        serializer = CommentSerializer(comment, data=request.data, partial=True)
+        if serializer.is_valid(raise_exception=True):
+            serializer.save() 
+            return Response(serializer.data, status=status.HTTP_200_OK)
+        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
+    # DELETE method to delete an existing comment
+    def delete(self, request, comment_id):
+        try:
+            comment = Comment.objects.get(id=comment_id)
+        except Comment.DoesNotExist:
+            return Response({'detail': 'Comment not found.'}, status=status.HTTP_404_NOT_FOUND)
+
+        # Ensure the authenticated user is the author of the comment
+        if comment.user != request.user:
+            return Response({'detail': 'You do not have permission to delete this comment.'},
+                            status=status.HTTP_403_FORBIDDEN)
+
+        comment.delete()  # Delete the comment
+        return Response({'detail': 'Comment deleted successfully.'}, status=status.HTTP_204_NO_CONTENT)
